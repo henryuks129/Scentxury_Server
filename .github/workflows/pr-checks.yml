@@ -1,0 +1,273 @@
+# ============================================
+# Pull Request Checks
+# ============================================
+# 
+# Runs on every Pull Request to ensure code quality
+# before merging into main/develop branches.
+#
+# ============================================
+
+name: 🔍 Pull Request Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    types: [opened, synchronize, reopened, ready_for_review]
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  # ============================================
+  # PR Info & Labels
+  # ============================================
+  pr-info:
+    name: 📝 PR Info
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📊 PR Stats
+        run: |
+          echo "### 📊 Pull Request Stats" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.head_ref }}\` → \`${{ github.base_ref }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Author:** @${{ github.event.pull_request.user.login }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commits:** ${{ github.event.pull_request.commits }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Changed Files:** ${{ github.event.pull_request.changed_files }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Additions:** +${{ github.event.pull_request.additions }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Deletions:** -${{ github.event.pull_request.deletions }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: 🏷️ Auto Label PR
+        uses: actions/labeler@v5
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          configuration-path: .github/labeler.yml
+
+  # ============================================
+  # Code Quality
+  # ============================================
+  quality-check:
+    name: 📋 Quality Check
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📚 Install Dependencies
+        run: npm ci --prefer-offline
+
+      - name: 🔍 ESLint
+        run: npm run lint
+
+      - name: 📝 TypeScript Check
+        run: npm run typecheck
+
+      - name: 💅 Prettier Check
+        run: npm run format:check
+        continue-on-error: true
+
+  # ============================================
+  # Tests with Coverage
+  # ============================================
+  test-coverage:
+    name: 🧪 Test Coverage
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    
+    services:
+      mongodb:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    env:
+      MONGO_URI: mongodb://localhost:27017/scentxury_test
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      JWT_SECRET: test-secret
+      NODE_ENV: test
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📚 Install Dependencies
+        run: npm ci --prefer-offline
+
+      - name: 🧪 Run Tests
+        run: npm run test:coverage
+
+      - name: 📊 Coverage Report
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+
+      - name: 💬 Comment Coverage
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            
+            // Read coverage summary if exists
+            let coverageComment = '### 📊 Test Coverage Report\n\n';
+            
+            try {
+              const coverage = JSON.parse(fs.readFileSync('./coverage/coverage-summary.json', 'utf8'));
+              const total = coverage.total;
+              
+              coverageComment += '| Metric | Coverage |\n';
+              coverageComment += '|--------|----------|\n';
+              coverageComment += `| Lines | ${total.lines.pct}% |\n`;
+              coverageComment += `| Statements | ${total.statements.pct}% |\n`;
+              coverageComment += `| Functions | ${total.functions.pct}% |\n`;
+              coverageComment += `| Branches | ${total.branches.pct}% |\n`;
+            } catch (e) {
+              coverageComment += '⚠️ Coverage data not available\n';
+            }
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: coverageComment
+            });
+
+  # ============================================
+  # Build Verification
+  # ============================================
+  build-check:
+    name: 🔨 Build Check
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📚 Install Dependencies
+        run: npm ci --prefer-offline
+
+      - name: 🔨 Build
+        run: npm run build
+
+      - name: 📦 Check Build Output
+        run: |
+          if [ -d "dist" ] && [ -f "dist/server.js" ]; then
+            echo "✅ Build successful!"
+            ls -la dist/
+          else
+            echo "❌ Build failed - missing output files"
+            exit 1
+          fi
+
+  # ============================================
+  # Security Scan
+  # ============================================
+  security-scan:
+    name: 🔒 Security Scan
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📚 Install Dependencies
+        run: npm ci --prefer-offline
+
+      - name: 🔐 NPM Audit
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+      - name: 🔍 Check for Secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
+          extra_args: --only-verified
+
+  # ============================================
+  # Docker Build Test
+  # ============================================
+  docker-build:
+    name: 🐳 Docker Build Test
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔨 Build Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: scentxury-api:pr-${{ github.event.pull_request.number }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ============================================
+  # Summary Status
+  # ============================================
+  pr-status:
+    name: ✅ PR Status
+    runs-on: ubuntu-latest
+    needs: [quality-check, test-coverage, build-check, security-scan, docker-build]
+    if: always()
+    
+    steps:
+      - name: 📋 Check Status
+        run: |
+          if [ "${{ needs.quality-check.result }}" == "failure" ] || \
+             [ "${{ needs.test-coverage.result }}" == "failure" ] || \
+             [ "${{ needs.build-check.result }}" == "failure" ]; then
+            echo "❌ One or more checks failed"
+            exit 1
+          fi
+          echo "✅ All PR checks passed!"

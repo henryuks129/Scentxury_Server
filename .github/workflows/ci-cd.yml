@@ -1,0 +1,517 @@
+# ============================================
+# SCENTXURY CI/CD PIPELINE
+# ============================================
+# 
+# Comprehensive CI/CD pipeline for the Scentxury Backend
+# Triggers: Push to main/develop, Pull Requests
+#
+# Jobs:
+# 1. Lint & Format Check
+# 2. Type Check
+# 3. Security Audit
+# 4. Unit & Integration Tests
+# 5. Build Verification
+# 6. Docker Build & Push
+# 7. Deploy to Staging/Production
+#
+# ============================================
+
+name: 🚀 Scentxury CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'release/*'
+      - 'hotfix/*'
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.vscode/**'
+  pull_request:
+    branches:
+      - main
+      - develop
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      skip_tests:
+        description: 'Skip tests (use with caution)'
+        required: false
+        default: false
+        type: boolean
+
+# ============================================
+# Environment Variables
+# ============================================
+env:
+  NODE_VERSION: '20.x'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DOCKER_BUILDKIT: 1
+
+# ============================================
+# Concurrency Control
+# ============================================
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================
+  # Job 1: Code Quality Checks
+  # ============================================
+  quality:
+    name: 📋 Code Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📚 Install Dependencies
+        run: npm ci --prefer-offline
+
+      - name: 🔍 ESLint Check
+        run: npm run lint
+        continue-on-error: false
+
+      - name: 💅 Prettier Format Check
+        run: npm run format:check
+        continue-on-error: true
+
+      - name: 📝 TypeScript Type Check
+        run: npm run typecheck
+
+      - name: 📊 Upload Lint Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-results
+          path: |
+            eslint-report.json
+          retention-days: 7
+
+  # ============================================
+  # Job 2: Security Audit
+  # ============================================
+  security:
+    name: 🔒 Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📚 Install Dependencies
+        run: npm ci --prefer-offline
+
+      - name: 🔐 NPM Audit
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+
+      - name: 🛡️ Snyk Security Scan
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+      - name: 📊 Upload Security Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: snyk-report.json
+          retention-days: 30
+
+  # ============================================
+  # Job 3: Unit & Integration Tests
+  # ============================================
+  test:
+    name: 🧪 Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [quality]
+    if: ${{ !inputs.skip_tests }}
+    
+    services:
+      # MongoDB for integration tests
+      mongodb:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      # Redis for integration tests
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      MONGO_URI: mongodb://localhost:27017/scentxury_test
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      JWT_SECRET: test-jwt-secret-for-ci
+      NODE_ENV: test
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📚 Install Dependencies
+        run: npm ci --prefer-offline
+
+      - name: 🧪 Run Unit Tests
+        run: npm run test:ci
+        env:
+          CI: true
+
+      - name: 📊 Upload Coverage Report
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-scentxury
+          fail_ci_if_error: false
+
+      - name: 📋 Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            coverage/
+            reports/
+          retention-days: 14
+
+  # ============================================
+  # Job 4: Build Verification
+  # ============================================
+  build:
+    name: 🔨 Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [quality]
+    
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📚 Install Dependencies
+        run: npm ci --prefer-offline
+
+      - name: 🔨 Build TypeScript
+        run: npm run build
+
+      - name: 📦 Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: dist/
+          retention-days: 7
+
+  # ============================================
+  # Job 5: Docker Build & Push
+  # ============================================
+  docker:
+    name: 🐳 Docker Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [test, build, security]
+    if: |
+      github.event_name == 'push' && 
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+      image_digest: ${{ steps.build-push.outputs.digest }}
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔐 Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📝 Extract Docker Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: 🔨 Build and Push Docker Image
+        id: build-push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NODE_ENV=production
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+
+      - name: 📋 Image Summary
+        run: |
+          echo "### 🐳 Docker Image Built Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
+          echo '${{ steps.meta.outputs.tags }}' | tr ',' '\n' | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Digest:** \`${{ steps.build-push.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
+  # Job 6: Deploy to Staging
+  # ============================================
+  deploy-staging:
+    name: 🚀 Deploy to Staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [docker]
+    if: |
+      github.ref == 'refs/heads/develop' ||
+      (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
+    environment:
+      name: staging
+      url: https://staging-api.scentxury.com
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🔐 Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: 🚀 Deploy to ECS Staging
+        run: |
+          echo "🚀 Deploying to staging environment..."
+          # Update ECS service with new image
+          aws ecs update-service \
+            --cluster scentxury-staging \
+            --service scentxury-api \
+            --force-new-deployment \
+            --region ${{ secrets.AWS_REGION }}
+
+      - name: ⏳ Wait for Deployment
+        run: |
+          echo "⏳ Waiting for deployment to stabilize..."
+          aws ecs wait services-stable \
+            --cluster scentxury-staging \
+            --services scentxury-api \
+            --region ${{ secrets.AWS_REGION }}
+
+      - name: 🏥 Health Check
+        run: |
+          echo "🏥 Running health check..."
+          for i in {1..10}; do
+            response=$(curl -s -o /dev/null -w "%{http_code}" https://staging-api.scentxury.com/health || echo "000")
+            if [ "$response" = "200" ]; then
+              echo "✅ Health check passed!"
+              exit 0
+            fi
+            echo "⏳ Attempt $i: Status $response, retrying..."
+            sleep 10
+          done
+          echo "❌ Health check failed!"
+          exit 1
+
+      - name: 📋 Deployment Summary
+        run: |
+          echo "### 🚀 Staging Deployment Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** Staging" >> $GITHUB_STEP_SUMMARY
+          echo "**URL:** https://staging-api.scentxury.com" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** ${{ needs.docker.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
+  # Job 7: Deploy to Production
+  # ============================================
+  deploy-production:
+    name: 🚀 Deploy to Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [docker, deploy-staging]
+    if: |
+      github.ref == 'refs/heads/main' ||
+      (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')
+    environment:
+      name: production
+      url: https://api.scentxury.com
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🔐 Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: 🚀 Deploy to ECS Production
+        run: |
+          echo "🚀 Deploying to production environment..."
+          aws ecs update-service \
+            --cluster scentxury-production \
+            --service scentxury-api \
+            --force-new-deployment \
+            --region ${{ secrets.AWS_REGION }}
+
+      - name: ⏳ Wait for Deployment
+        run: |
+          echo "⏳ Waiting for deployment to stabilize..."
+          aws ecs wait services-stable \
+            --cluster scentxury-production \
+            --services scentxury-api \
+            --region ${{ secrets.AWS_REGION }}
+
+      - name: 🏥 Health Check
+        run: |
+          echo "🏥 Running production health check..."
+          for i in {1..10}; do
+            response=$(curl -s -o /dev/null -w "%{http_code}" https://api.scentxury.com/health || echo "000")
+            if [ "$response" = "200" ]; then
+              echo "✅ Health check passed!"
+              exit 0
+            fi
+            echo "⏳ Attempt $i: Status $response, retrying..."
+            sleep 10
+          done
+          echo "❌ Health check failed!"
+          exit 1
+
+      - name: 📋 Deployment Summary
+        run: |
+          echo "### 🚀 Production Deployment Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** Production" >> $GITHUB_STEP_SUMMARY
+          echo "**URL:** https://api.scentxury.com" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** ${{ needs.docker.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: 📢 Notify Slack
+        if: success()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "🚀 Scentxury API deployed to production!",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*🚀 Production Deployment Successful*\n\n*Commit:* `${{ github.sha }}`\n*Author:* ${{ github.actor }}\n*URL:* https://api.scentxury.com"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # ============================================
+  # Job 8: Notify on Failure
+  # ============================================
+  notify-failure:
+    name: 📢 Notify Failure
+    runs-on: ubuntu-latest
+    needs: [quality, security, test, build, docker, deploy-staging, deploy-production]
+    if: failure()
+    
+    steps:
+      - name: 📢 Send Failure Notification
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "❌ Scentxury CI/CD Pipeline Failed!",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*❌ CI/CD Pipeline Failed*\n\n*Branch:* `${{ github.ref_name }}`\n*Commit:* `${{ github.sha }}`\n*Author:* ${{ github.actor }}\n*Workflow:* ${{ github.workflow }}\n*Run:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Details>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -1,0 +1,151 @@
+# Scentxury OMNI-PWA - Docker Compose Orchestration
+# Services: API, MongoDB, Redis
+
+services:
+  # ============================================
+  # Node.js/Express API Service
+  # ============================================
+  api:
+    container_name: scentxury_api
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    ports:
+      - "5001:5000"
+    environment:
+      - NODE_ENV=development
+      - PORT=5000
+      - MONGO_URI=mongodb://mongo:27017/scentxury
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET:-dev_jwt_secret_change_in_production}
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+      - PAYSTACK_SECRET_KEY=${PAYSTACK_SECRET_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - SESSION_SECRET=${SESSION_SECRET:-dev_session_secret}
+      - ONESIGNAL_APP_ID=${ONESIGNAL_APP_ID}
+      - ONESIGNAL_API_KEY=${ONESIGNAL_API_KEY}
+      - SENTRY_DSN=${SENTRY_DSN}
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - scentxury_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ============================================
+  # MongoDB Database Service
+  # ============================================
+  mongo:
+    container_name: scentxury_mongo
+    image: mongo:7.0
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=scentxury
+    volumes:
+      - mongo_data:/data/db
+      - mongo_config:/data/configdb
+      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    networks:
+      - scentxury_network
+    restart: unless-stopped
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/scentxury --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ============================================
+  # Redis Cache & Queue Service
+  # ============================================
+  redis:
+    container_name: scentxury_redis
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - scentxury_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ============================================
+  # Redis Commander (Dev UI for Redis)
+  # ============================================
+  redis-commander:
+    container_name: scentxury_redis_ui
+    image: rediscommander/redis-commander:latest
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    depends_on:
+      - redis
+    networks:
+      - scentxury_network
+    profiles:
+      - dev-tools
+
+  # ============================================
+  # Mongo Express (Dev UI for MongoDB)
+  # ============================================
+  mongo-express:
+    container_name: scentxury_mongo_ui
+    image: mongo-express:latest
+    ports:
+      - "8082:8081"
+    environment:
+      - ME_CONFIG_MONGODB_SERVER=mongo
+      - ME_CONFIG_MONGODB_PORT=27017
+      - ME_CONFIG_BASICAUTH_USERNAME=admin
+      - ME_CONFIG_BASICAUTH_PASSWORD=admin123
+    depends_on:
+      - mongo
+    networks:
+      - scentxury_network
+    profiles:
+      - dev-tools
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  scentxury_network:
+    driver: bridge
+    name: scentxury_network
+
+# ============================================
+# Persistent Volumes
+# ============================================
+volumes:
+  mongo_data:
+    name: scentxury_mongo_data
+  mongo_config:
+    name: scentxury_mongo_config
+  redis_data:
+    name: scentxury_redis_data

@@ -1,0 +1,242 @@
+# ============================================
+# Scheduled Jobs (Cron)
+# ============================================
+# 
+# Runs on schedule for maintenance tasks:
+# - Daily security scans
+# - Weekly dependency updates
+# - Monthly cleanup
+#
+# ============================================
+
+name: ⏰ Scheduled Jobs
+
+on:
+  schedule:
+    # Daily at 2 AM UTC - Security scan
+    - cron: '0 2 * * *'
+    # Weekly on Sunday at 3 AM UTC - Dependency check
+    - cron: '0 3 * * 0'
+    # Monthly on 1st at 4 AM UTC - Cleanup
+    - cron: '0 4 1 * *'
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 'Job to run'
+        required: true
+        type: choice
+        options:
+          - security-scan
+          - dependency-update
+          - cleanup
+          - all
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  # ============================================
+  # Daily Security Scan
+  # ============================================
+  security-scan:
+    name: 🔒 Daily Security Scan
+    runs-on: ubuntu-latest
+    if: |
+      github.event.schedule == '0 2 * * *' ||
+      (github.event_name == 'workflow_dispatch' && (inputs.job == 'security-scan' || inputs.job == 'all'))
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📚 Install Dependencies
+        run: npm ci --prefer-offline
+
+      - name: 🔐 NPM Audit
+        id: audit
+        run: |
+          npm audit --json > audit-report.json || true
+          
+          # Count vulnerabilities
+          CRITICAL=$(cat audit-report.json | jq '.metadata.vulnerabilities.critical // 0')
+          HIGH=$(cat audit-report.json | jq '.metadata.vulnerabilities.high // 0')
+          MODERATE=$(cat audit-report.json | jq '.metadata.vulnerabilities.moderate // 0')
+          
+          echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+          echo "high=$HIGH" >> $GITHUB_OUTPUT
+          echo "moderate=$MODERATE" >> $GITHUB_OUTPUT
+          
+          if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+            echo "has_issues=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_issues=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🛡️ Snyk Scan
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: 🔍 CodeQL Analysis
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+
+      - name: 🔍 Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+      - name: 📢 Notify if Critical Issues
+        if: steps.audit.outputs.has_issues == 'true'
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "⚠️ Security vulnerabilities detected in Scentxury Backend!",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*⚠️ Security Alert*\n\nVulnerabilities found:\n• Critical: ${{ steps.audit.outputs.critical }}\n• High: ${{ steps.audit.outputs.high }}\n• Moderate: ${{ steps.audit.outputs.moderate }}\n\nPlease review and fix immediately."
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: 📊 Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report-${{ github.run_id }}
+          path: audit-report.json
+          retention-days: 30
+
+  # ============================================
+  # Weekly Dependency Check
+  # ============================================
+  dependency-update:
+    name: 📦 Dependency Check
+    runs-on: ubuntu-latest
+    if: |
+      github.event.schedule == '0 3 * * 0' ||
+      (github.event_name == 'workflow_dispatch' && (inputs.job == 'dependency-update' || inputs.job == 'all'))
+    
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📊 Check Outdated Packages
+        id: outdated
+        run: |
+          npm outdated --json > outdated.json || true
+          
+          # Count outdated packages
+          COUNT=$(cat outdated.json | jq 'length')
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+          
+          # Get list of major updates
+          MAJOR=$(cat outdated.json | jq -r 'to_entries[] | select(.value.current != .value.latest) | .key' | head -10 | tr '\n' ', ')
+          echo "packages=$MAJOR" >> $GITHUB_OUTPUT
+
+      - name: 🔄 Update Dependencies
+        if: steps.outdated.outputs.count > 0
+        run: |
+          # Update non-breaking changes only
+          npm update
+          
+          # Check if package-lock.json changed
+          if git diff --quiet package-lock.json; then
+            echo "No updates available"
+            exit 0
+          fi
+
+      - name: 🔨 Test After Update
+        if: steps.outdated.outputs.count > 0
+        run: |
+          npm ci
+          npm run build
+          npm run test || true
+
+      - name: 📝 Create PR
+        if: steps.outdated.outputs.count > 0
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore(deps): update dependencies'
+          title: '📦 Weekly Dependency Updates'
+          body: |
+            ## 📦 Automated Dependency Update
+
+            This PR was automatically created by the weekly dependency check.
+
+            ### Updated Packages
+            ${{ steps.outdated.outputs.packages }}
+
+            ### Checklist
+            - [ ] Review updated packages
+            - [ ] Check for breaking changes
+            - [ ] Run tests locally
+            - [ ] Merge if all checks pass
+          branch: chore/weekly-dependency-update
+          delete-branch: true
+          labels: |
+            dependencies
+            automated
+
+  # ============================================
+  # Monthly Cleanup
+  # ============================================
+  cleanup:
+    name: 🧹 Monthly Cleanup
+    runs-on: ubuntu-latest
+    if: |
+      github.event.schedule == '0 4 1 * *' ||
+      (github.event_name == 'workflow_dispatch' && (inputs.job == 'cleanup' || inputs.job == 'all'))
+    
+    permissions:
+      actions: write
+      packages: write
+
+    steps:
+      - name: 🗑️ Delete Old Workflow Runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          retain_days: 30
+          keep_minimum_runs: 10
+
+      - name: 🐳 Cleanup Old Docker Images
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: scentxury-backend
+          package-type: container
+          min-versions-to-keep: 10
+          delete-only-untagged-versions: true
+
+      - name: 📋 Cleanup Summary
+        run: |
+          echo "### 🧹 Monthly Cleanup Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Old workflow runs deleted (>30 days)" >> $GITHUB_STEP_SUMMARY
+          echo "- Untagged Docker images removed" >> $GITHUB_STEP_SUMMARY

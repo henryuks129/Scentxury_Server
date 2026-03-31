@@ -1,0 +1,144 @@
+# ============================================
+# Pull Request Labeler Configuration
+# ============================================
+# 
+# Automatically adds labels to PRs based on
+# changed files and paths
+#
+# ============================================
+
+# Source code changes
+'type: feature':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/controllers/**'
+          - 'src/services/**'
+          - 'src/routes/**'
+
+'type: bug':
+  - head-branch:
+      - '^fix/'
+      - '^bugfix/'
+      - '^hotfix/'
+
+'type: docs':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.md'
+          - 'docs/**'
+
+'type: test':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.test.ts'
+          - '**/*.spec.ts'
+          - 'tests/**'
+          - 'vitest.config.ts'
+
+'type: config':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '*.json'
+          - '*.yml'
+          - '*.yaml'
+          - '.env*'
+          - 'tsconfig.json'
+
+'type: ci':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/**'
+          - 'Dockerfile'
+          - 'docker-compose*.yml'
+
+# Area labels
+'area: auth':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/**/auth*'
+          - 'src/config/passport.ts'
+
+'area: products':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/**/product*'
+
+'area: orders':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/**/order*'
+
+'area: payments':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/**/payment*'
+          - 'src/services/payment*'
+
+'area: admin':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/**/admin*'
+          - 'src/services/analytics*'
+
+'area: recommendations':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/**/recommend*'
+          - 'src/services/recommendation*'
+
+'area: database':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/models/**'
+          - 'src/config/database.ts'
+
+'area: cache':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/config/redis.ts'
+          - 'src/queues/**'
+
+# Size labels (estimated by lines changed)
+'size: XS':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '*'
+      - all-globs-to-all-files:
+          - '!**/*.lock'
+
+'size: S':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '*'
+          - '**/*'
+
+'size: M':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*'
+
+'size: L':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*'
+
+# Breaking changes
+'breaking':
+  - head-branch:
+      - '^breaking/'
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/models/**'
+          - 'src/routes/**'
+
+# Needs review
+'needs: review':
+  - head-branch:
+      - '^feature/'
+      - '^feat/'
+
+# Priority
+'priority: high':
+  - head-branch:
+      - '^hotfix/'
+      - '^security/'

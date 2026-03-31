@@ -1,0 +1,222 @@
+# Scentxury OMNI-PWA — Production Docker Compose
+#
+# Differences from docker-compose.yml (development):
+#   - No dev-tools profile (no Mongo Express / Redis Commander)
+#   - Production build target (multi-stage Dockerfile)
+#   - Resource limits to prevent container OOM
+#   - MongoDB with authentication enabled
+#   - Redis with password protection
+#   - Only API port 5000 exposed to the host (no DB ports)
+#   - Restart policy: unless-stopped
+#   - Health checks on all services
+#   - Named network for strict service isolation
+#
+# Required environment variables (set in .env.prod or via CI/CD secrets):
+#   MONGO_ROOT_USER, MONGO_ROOT_PASSWORD, MONGO_DB_PASSWORD
+#   REDIS_PASSWORD
+#   JWT_SECRET, SESSION_SECRET
+#   CLOUDINARY_*, PAYSTACK_SECRET_KEY, STRIPE_SECRET_KEY
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+#   ONESIGNAL_APP_ID, ONESIGNAL_API_KEY
+#   SENTRY_DSN
+
+services:
+  # ============================================
+  # Node.js/Express API Service
+  # ============================================
+  api:
+    container_name: scentxury_api_prod
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      # Only expose the API port — DB and cache ports are internal only
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      # MongoDB URI uses authentication credentials
+      - MONGO_URI=mongodb://${MONGO_DB_USER:-scentxury}:${MONGO_DB_PASSWORD}@mongo:27017/scentxury?authSource=scentxury
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+      - PAYSTACK_SECRET_KEY=${PAYSTACK_SECRET_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - ONESIGNAL_APP_ID=${ONESIGNAL_APP_ID}
+      - ONESIGNAL_API_KEY=${ONESIGNAL_API_KEY}
+      - SENTRY_DSN=${SENTRY_DSN}
+      - FRONTEND_URL=${FRONTEND_URL:-https://scentxury.com}
+      - CORS_ORIGINS=${CORS_ORIGINS:-https://scentxury.com,https://www.scentxury.com}
+      - BCRYPT_ROUNDS=12
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - scentxury_prod_network
+    restart: unless-stopped
+    # No source code volume mount in production — image contains compiled JS
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '1.0'
+        reservations:
+          memory: 256m
+          cpus: '0.25'
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "require('http').get('http://localhost:5000/health/live', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ============================================
+  # MongoDB Database Service (with auth)
+  # ============================================
+  mongo:
+    container_name: scentxury_mongo_prod
+    image: mongo:7.0
+    # No host port binding in production — accessed only by the api container
+    expose:
+      - "27017"
+    environment:
+      # Root credentials for initial setup (only used on first start)
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USER:-mongoadmin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
+      - MONGO_INITDB_DATABASE=scentxury
+    volumes:
+      - mongo_prod_data:/data/db
+      - mongo_prod_config:/data/configdb
+      # Initialization script creates the application database user
+      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    networks:
+      - scentxury_prod_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: '1.0'
+        reservations:
+          memory: 512m
+          cpus: '0.25'
+    healthcheck:
+      test:
+        - "CMD"
+        - "mongosh"
+        - "--quiet"
+        - "--eval"
+        - "db.adminCommand('ping').ok"
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # Redis Cache & Queue Service (with password)
+  # ============================================
+  redis:
+    container_name: scentxury_redis_prod
+    image: redis:7-alpine
+    # No host port binding — internal only
+    expose:
+      - "6379"
+    command:
+      - "redis-server"
+      - "--requirepass"
+      - "${REDIS_PASSWORD}"
+      - "--appendonly"
+      - "yes"
+      - "--maxmemory"
+      - "256mb"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
+      # Disable dangerous commands in production
+      - "--rename-command"
+      - "FLUSHALL"
+      - ""
+      - "--rename-command"
+      - "FLUSHDB"
+      - ""
+      - "--rename-command"
+      - "CONFIG"
+      - ""
+      - "--rename-command"
+      - "DEBUG"
+      - ""
+    volumes:
+      - redis_prod_data:/data
+    networks:
+      - scentxury_prod_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '0.5'
+        reservations:
+          memory: 64m
+          cpus: '0.1'
+    healthcheck:
+      test:
+        - "CMD"
+        - "redis-cli"
+        - "-a"
+        - "${REDIS_PASSWORD}"
+        - "ping"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+# ============================================
+# Networks — isolated production network
+# ============================================
+networks:
+  scentxury_prod_network:
+    driver: bridge
+    name: scentxury_prod_network
+    # Internal network — containers can reach each other but
+    # no direct external access to DB/cache ports
+    internal: false
+
+# ============================================
+# Persistent Volumes — separate from dev volumes
+# ============================================
+volumes:
+  mongo_prod_data:
+    name: scentxury_mongo_prod_data
+  mongo_prod_config:
+    name: scentxury_mongo_prod_config
+  redis_prod_data:
+    name: scentxury_redis_prod_data

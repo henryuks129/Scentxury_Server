@@ -1,0 +1,96 @@
+# ============================================
+# SCENTXURY BACKEND - GITIGNORE
+# ============================================
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment files (NEVER commit these)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage
+coverage/
+.nyc_output/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Uploads (if stored locally during dev)
+uploads/
+temp/
+
+# Testing
+.jest/
+__snapshots__/
+
+# OS generated
+*.orig
+*.rej
+
+# Certificates
+*.pem
+*.key
+*.crt
+
+# Misc
+.cache/
+*.bak
+
+# Snyk Security Extension - AI Rules (auto-generated)
+.github/instructions/snyk_rules.instructions.md
+
+# Claude Code & IDE tool configs
+.claude/
+.qodo/
+.dist/
+
+# Sprint / development planning docs (internal only)
+CLAUDE.md
+PLAN.md
+PLAN_BI.md
+PWD.md
+DAY*_CHECKLIST.md
+day*_checklist.md
+day*_documentation.txt
+DAY*_CHECKLIST.md
+cliff.toml
+
+# Env documentation & key templates
+SECRET_KEYS.md
+API_KEYS_CHECKLIST.txt
+env.template
+.env.example
