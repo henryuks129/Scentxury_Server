@@ -17,7 +17,7 @@
  * @file src/services/__tests__/recommendation.service.perf.test.ts
  */
 
-import { describe, it, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import mongoose from 'mongoose';
 import { RecommendationService } from '../recommendation.service.js';
 import { Product } from '../../models/Product.js';
@@ -28,7 +28,6 @@ import { measureTime, expectPerformance } from '../../test/helpers.js';
 // ============================================
 // MOCK REDIS (no real Redis in CI)
 // ============================================
-import { vi } from 'vitest';
 vi.mock('../../config/redis.js', () => ({
   redisClient: {
     get: vi.fn().mockResolvedValue(null),

@@ -16,7 +16,7 @@
  * @file src/controllers/__tests__/recommendation.controller.perf.test.ts
  */
 
-import { describe, it, beforeEach } from 'vitest';
+import { describe, it, beforeEach, vi } from 'vitest';
 import mongoose from 'mongoose';
 import {
   getHybridRecommendations,
@@ -27,7 +27,6 @@ import { mockRequest, mockResponse, mockNext, expectPerformance } from '../../te
 // ============================================
 // MOCK RECOMMENDATION SERVICE
 // ============================================
-import { vi } from 'vitest';
 
 // Build a realistic-size fake product list to approximate serialisation cost
 const fakeCatalog = Array.from({ length: 20 }, (_, i) => ({
