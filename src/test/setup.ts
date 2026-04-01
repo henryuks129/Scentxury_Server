@@ -119,7 +119,8 @@ beforeAll(async () => {
  */
 afterAll(async () => {
   try {
-    const client = mongoose.connection.client;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = (mongoose.connection as any).client;
     if (client) {
       // Strip the listeners Mongoose registered in _setClient() so they don't
       // fire (and try to write readyState) when client.close() triggers topology
