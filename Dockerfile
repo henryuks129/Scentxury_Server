@@ -33,6 +33,9 @@ RUN apk add --no-cache \
     g++ \
     && rm -rf /var/cache/apk/*
 
+# Upgrade npm to match the version used to generate package-lock.json
+RUN npm install -g npm@11
+
 WORKDIR /app
 
 # ============================================
