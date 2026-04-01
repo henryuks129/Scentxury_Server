@@ -1,7 +1,7 @@
 # ============================================
 # Scentxury Backend - Multi-Stage Dockerfile
 # ============================================
-# 
+#
 # Optimized for production with:
 # - Multi-stage builds for minimal image size
 # - Non-root user for security
@@ -70,50 +70,6 @@ RUN npm prune --production && \
     npm cache clean --force
 
 # ============================================
-# Production Stage - Final image
-# ============================================
-FROM node:${NODE_VERSION}-alpine AS production
-
-# Labels for container metadata
-LABEL org.opencontainers.image.title="Scentxury API"
-LABEL org.opencontainers.image.description="Premium Fragrance E-commerce Backend"
-LABEL org.opencontainers.image.version="${VERSION}"
-LABEL org.opencontainers.image.created="${BUILD_DATE}"
-LABEL org.opencontainers.image.revision="${VCS_REF}"
-LABEL org.opencontainers.image.vendor="Chi Fragrance"
-LABEL org.opencontainers.image.source="https://github.com/chi-fragrance/scentxury-backend"
-LABEL org.opencontainers.image.licenses="ISC"
-
-WORKDIR /app
-
-# Set production environment
-ENV NODE_ENV=production
-ENV PORT=5000
-
-# Create non-root user for security
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 --ingroup nodejs scentxury && \
-    chown -R scentxury:nodejs /app
-
-# Copy only necessary files from builder
-COPY --from=builder --chown=scentxury:nodejs /app/dist ./dist
-COPY --from=builder --chown=scentxury:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=scentxury:nodejs /app/package*.json ./
-
-# Switch to non-root user
-USER scentxury
-
-# Expose application port
-EXPOSE 5000
-
-# Health check - verify API is responding
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:5000/health/live', (r) => { console.log('Health:', r.statusCode); process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1))"
-
-# Start the server
-CMD ["node", "dist/server.js"]
-
-# ============================================
 # Development Stage - For local development
 # ============================================
 FROM base AS development
@@ -159,3 +115,47 @@ COPY . .
 
 # Run tests
 CMD ["npm", "run", "test:ci"]
+
+# ============================================
+# Production Stage - Final image (must be last)
+# ============================================
+FROM node:${NODE_VERSION}-alpine AS production
+
+# Labels for container metadata
+LABEL org.opencontainers.image.title="Scentxury API"
+LABEL org.opencontainers.image.description="Premium Fragrance E-commerce Backend"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.revision="${VCS_REF}"
+LABEL org.opencontainers.image.vendor="Chi Fragrance"
+LABEL org.opencontainers.image.source="https://github.com/chi-fragrance/scentxury-backend"
+LABEL org.opencontainers.image.licenses="ISC"
+
+WORKDIR /app
+
+# Set production environment
+ENV NODE_ENV=production
+ENV PORT=5000
+
+# Create non-root user for security
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 --ingroup nodejs scentxury && \
+    chown -R scentxury:nodejs /app
+
+# Copy only necessary files from builder
+COPY --from=builder --chown=scentxury:nodejs /app/dist ./dist
+COPY --from=builder --chown=scentxury:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=scentxury:nodejs /app/package*.json ./
+
+# Switch to non-root user
+USER scentxury
+
+# Expose application port
+EXPOSE 5000
+
+# Health check - verify API is responding
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD node -e "require('http').get('http://localhost:5000/health/live', (r) => { console.log('Health:', r.statusCode); process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1))"
+
+# Start the server
+CMD ["node", "dist/server.js"]
