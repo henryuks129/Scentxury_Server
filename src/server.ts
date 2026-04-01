@@ -42,19 +42,21 @@ async function startServer(): Promise<void> {
   try {
     console.log('🚀 Starting Scentxury API Server...\n');
 
-    // Step 1: Connect to MongoDB
+    // Step 1: Start HTTP server first so /health is always reachable
+    await new Promise<void>((resolve) => httpServer.listen(PORT, '0.0.0.0', resolve));
+    console.log(`✅ HTTP server listening on port ${PORT}\n`);
+
+    // Step 2: Connect to MongoDB
     console.log('📦 Connecting to MongoDB...');
     await connectDatabase();
     console.log('✅ MongoDB connected successfully\n');
 
-    // Step 2: Connect to Redis
+    // Step 3: Connect to Redis
     console.log('🔴 Connecting to Redis...');
     await connectRedis();
     console.log('✅ Redis connected successfully\n');
 
-    // Step 3: Start HTTP server
-    httpServer.listen(PORT, '0.0.0.0', () => {
-      console.log(`
+    console.log(`
 ╔══════════════════════════════════════════════════════════════════╗
 ║                                                                  ║
 ║   🌸 SCENTXURY API SERVER - Chi Fragrance E-commerce             ║
@@ -80,12 +82,7 @@ async function startServer(): Promise<void> {
 ║   🕐 Started:  ${new Date().toISOString()}               ║
 ║                                                                  ║
 ╚══════════════════════════════════════════════════════════════════╝
-      `);
-    });
-
-    // Step 4: Initialize background jobs (optional)
-    // await initializeCronJobs();
-    // await initializeBullMQWorkers();
+    `);
 
   } catch (error) {
     console.error('❌ Failed to start server:', error);
