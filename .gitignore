@@ -75,6 +75,7 @@ __snapshots__/
 
 # Claude Code & IDE tool configs
 .claude/
+.claudeignore
 .qodo/
 .dist/
 

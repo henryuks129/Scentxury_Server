@@ -16,9 +16,9 @@ import {
   Profile as GoogleProfile,
   VerifyCallback,
 } from 'passport-google-oauth20';
-// passport-apple has no bundled type declarations — use require + type-cast
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const AppleStrategy = require('passport-apple');
+import { createRequire } from 'module';
+// passport-apple has no bundled type declarations; use createRequire for CJS interop in ESM
+const AppleStrategy = createRequire(import.meta.url)('passport-apple');
 import jwt from 'jsonwebtoken';
 import { User, IUser } from '../models/User.js';
 

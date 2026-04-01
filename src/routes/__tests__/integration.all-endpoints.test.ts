@@ -1209,21 +1209,16 @@ describe('Resilience & Retry Behaviour', () => {
   });
 
   it('MongoDB disconnection → 503 on /health/ready', async () => {
-    // Simulate mongoose disconnected state
-    const originalState = mongoose.connection.readyState;
-    Object.defineProperty(mongoose.connection, 'readyState', {
-      configurable: true,
-      get: () => 0, // disconnected
-    });
+    // Simulate mongoose disconnected state using vi.spyOn so that
+    // afterEach → vi.restoreAllMocks() properly restores the prototype
+    // getter+setter.  Direct Object.defineProperty without a setter leaves
+    // the instance property getter-only, which breaks mongoose.disconnect()
+    // calls in subsequent test files (singleFork mode).
+    vi.spyOn(mongoose.connection, 'readyState', 'get').mockReturnValue(0);
 
     const res = await request(app).get('/health/ready');
     expect(res.status).toBe(503);
-
-    // Restore
-    Object.defineProperty(mongoose.connection, 'readyState', {
-      configurable: true,
-      get: () => originalState,
-    });
+    // Restored automatically by afterEach → vi.restoreAllMocks()
   });
 
   it('Redis retry strategy does not throw on first 10 retries', () => {

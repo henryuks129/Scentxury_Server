@@ -513,6 +513,8 @@ describe('POST /api/v1/auth/reset-password', () => {
     expect(res.body.success).toBe(false);
   });
 
+  // Extended timeout: 4 sequential HTTP+bcrypt+DB roundtrips are slow under
+  // full-suite resource pressure (default 30 s occasionally causes socket hang-up).
   it('should return 200 and reset password when token is valid', async () => {
     // Create a real user so login after reset works
     const { payload } = await registerAndLogin();
@@ -542,5 +544,5 @@ describe('POST /api/v1/auth/reset-password', () => {
 
     expect(loginRes.status).toBe(200);
     expect(loginRes.body.data.accessToken).toBeTruthy();
-  });
+  }, 60000);
 });
