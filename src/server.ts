@@ -46,10 +46,15 @@ async function startServer(): Promise<void> {
     await new Promise<void>((resolve) => httpServer.listen(PORT, '0.0.0.0', resolve));
     console.log(`✅ HTTP server listening on port ${PORT}\n`);
 
-    // Step 2: Connect to MongoDB
+    // Step 2: Connect to MongoDB (non-fatal — app runs in degraded mode if unavailable)
     console.log('📦 Connecting to MongoDB...');
-    await connectDatabase();
-    console.log('✅ MongoDB connected successfully\n');
+    try {
+      await connectDatabase();
+      console.log('✅ MongoDB connected successfully\n');
+    } catch (mongoError) {
+      console.warn('⚠️  MongoDB unavailable - running in degraded mode (DB operations disabled)');
+      console.warn('   Reason:', mongoError instanceof Error ? mongoError.message : mongoError, '\n');
+    }
 
     // Step 3: Connect to Redis (non-fatal — app runs in degraded mode if unavailable)
     console.log('🔴 Connecting to Redis...');
