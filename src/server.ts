@@ -51,10 +51,15 @@ async function startServer(): Promise<void> {
     await connectDatabase();
     console.log('✅ MongoDB connected successfully\n');
 
-    // Step 3: Connect to Redis
+    // Step 3: Connect to Redis (non-fatal — app runs in degraded mode if unavailable)
     console.log('🔴 Connecting to Redis...');
-    await connectRedis();
-    console.log('✅ Redis connected successfully\n');
+    try {
+      await connectRedis();
+      console.log('✅ Redis connected successfully\n');
+    } catch (redisError) {
+      console.warn('⚠️  Redis unavailable - running in degraded mode (caching/queues disabled)');
+      console.warn('   Reason:', redisError instanceof Error ? redisError.message : redisError, '\n');
+    }
 
     console.log(`
 ╔══════════════════════════════════════════════════════════════════╗

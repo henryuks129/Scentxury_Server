@@ -2,20 +2,20 @@ import { Redis } from 'ioredis';
 
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
 const REDIS_PORT = parseInt(process.env.REDIS_PORT || '6379', 10);
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
 
 // Main Redis client for general caching
 export const redisClient = new Redis({
   host: REDIS_HOST,
   port: REDIS_PORT,
+  password: REDIS_PASSWORD,
   maxRetriesPerRequest: null, // Required for BullMQ
   enableReadyCheck: false,
   retryStrategy: (times: number) => {
-    if (times > 10) {
-      console.error('🔴 Redis: Max reconnection attempts reached');
-      return null;
-    }
-    const delay = Math.min(times * 100, 3000);
-    console.log(`🔄 Redis: Reconnecting in ${delay}ms...`);
+    // Cap at 30s between retries; keep retrying indefinitely so the client
+    // can recover if Redis becomes available after startup (e.g. Railway cold start)
+    const delay = Math.min(times * 500, 30000);
+    console.log(`🔄 Redis: Reconnecting in ${delay}ms (attempt ${times})...`);
     return delay;
   },
 });
